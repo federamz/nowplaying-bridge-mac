@@ -37,13 +37,17 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
 APP_NAME = "NowPlaying Bridge"
-VERSION = "1.0.0-mac"
+VERSION = "1.0.1-mac"
 DEFAULT_PORT = 5788
 POLL_SECONDS = 0.5   # osascript is a process launch, so slower than the Windows loop
 QUIET = False
 
 # AppleScript joins fields with the ASCII unit separator: safe inside track names
 # in a way that a comma, tab or pipe is not.
+#
+# It must be built INSIDE the script with `character id 31` — pasting the raw
+# control byte into the source is a syntax error (-2741), because AppleScript's
+# parser will not accept an unescaped control character in a string literal.
 SEP = "\x1f"
 
 
@@ -201,8 +205,9 @@ def run_applescript(source, timeout=4.0):
 # Each adapter asks one app for everything in a single call. `is running` is
 # checked first and never launches the app — an overlay that opened iTunes
 # because someone loaded a browser source would be a genuine disaster.
-MUSIC_SCRIPT = f"""
+MUSIC_SCRIPT = """
 if application "Music" is not running then return ""
+set sp to (character id 31)
 tell application "Music"
   set st to (player state as text)
   if st is "stopped" then return "stopped"
@@ -210,6 +215,15 @@ tell application "Music"
     set t to current track
   on error
     return "stopped"
+  end try
+  set nm to ""
+  try
+    set nm to (name of t)
+  end try
+  if nm is "" then return "stopped"
+  set ar to ""
+  try
+    set ar to (artist of t)
   end try
   set alb to ""
   try
@@ -219,20 +233,29 @@ tell application "Music"
   try
     set aart to (album artist of t)
   end try
+  set dur to 0
+  try
+    set dur to (duration of t)
+  end try
+  set pos to 0
+  try
+    set pos to (player position)
+  end try
   set trkn to 0
   try
     set trkn to (track number of t)
   end try
-  return st & "{SEP}" & (name of t) & "{SEP}" & (artist of t) & "{SEP}" & alb & ¬
-    "{SEP}" & aart & "{SEP}" & ((duration of t) as text) & "{SEP}" & ¬
-    ((player position) as text) & "{SEP}" & (trkn as text)
+  set out to st & sp & nm & sp & ar & sp & alb & sp & aart
+  set out to out & sp & (dur as text) & sp & (pos as text) & sp & (trkn as text)
+  return out
 end tell
 """
 
 # Spotify reports duration in MILLISECONDS while position is in seconds. Mixing
 # those up is the classic bug in every Spotify-on-Mac integration.
-SPOTIFY_SCRIPT = f"""
+SPOTIFY_SCRIPT = """
 if application "Spotify" is not running then return ""
+set sp to (character id 31)
 tell application "Spotify"
   set st to (player state as text)
   if st is "stopped" then return "stopped"
@@ -241,21 +264,42 @@ tell application "Spotify"
   on error
     return "stopped"
   end try
-  set art to ""
+  set nm to ""
   try
-    set art to (artwork url of t)
+    set nm to (name of t)
+  end try
+  if nm is "" then return "stopped"
+  set ar to ""
+  try
+    set ar to (artist of t)
+  end try
+  set alb to ""
+  try
+    set alb to (album of t)
   end try
   set aart to ""
   try
     set aart to (album artist of t)
   end try
+  set dur to 0
+  try
+    set dur to (duration of t)
+  end try
+  set pos to 0
+  try
+    set pos to (player position)
+  end try
   set trkn to 0
   try
     set trkn to (track number of t)
   end try
-  return st & "{SEP}" & (name of t) & "{SEP}" & (artist of t) & "{SEP}" & (album of t) & ¬
-    "{SEP}" & aart & "{SEP}" & ((duration of t) as text) & "{SEP}" & ¬
-    ((player position) as text) & "{SEP}" & (trkn as text) & "{SEP}" & art
+  set art to ""
+  try
+    set art to (artwork url of t)
+  end try
+  set out to st & sp & nm & sp & ar & sp & alb & sp & aart
+  set out to out & sp & (dur as text) & sp & (pos as text) & sp & (trkn as text) & sp & art
+  return out
 end tell
 """
 
@@ -458,7 +502,10 @@ def poll_once():
             permission_denied = True
             continue
         if err:
-            other_error = err
+            # A real AppleScript fault, not just "nothing loaded". Surface it:
+            # a syntax or dictionary error is a bug I need to see, and silently
+            # showing "nothing playing" would hide it.
+            other_error = f"{adapter['name']}: {err}"
             continue
         session = parse_fields(raw, adapter)
         if session:

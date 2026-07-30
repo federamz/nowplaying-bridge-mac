@@ -141,7 +141,7 @@ class StatusWindow:
 
         if error:
             self._set_dot(RED)
-            self.status_text.configure(text="Cannot read Windows media info", fg=RED)
+            self.status_text.configure(text="Cannot read your music apps", fg=RED)
             self.title_lbl.configure(text="Nothing playing")
             self.artist_lbl.configure(text=str(error)[:120])
             self.app_lbl.configure(text="")
