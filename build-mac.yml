@@ -1,0 +1,122 @@
+name: Build NowPlaying Bridge (macOS)
+
+# Builds the .app on GitHub's own Mac machines, so you don't need Python or Xcode.
+# Run it from the Actions tab, or let it run automatically when you publish a
+# release.
+#
+# Apple Silicon and Intel need separate binaries — a Mac build is not universal
+# unless it is explicitly made so, and PyInstaller cannot cross-build. Two legs
+# of the matrix produce two zips; fail-fast is off so a runner-image retirement
+# on one leg still ships the other.
+
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+            label: Apple Silicon
+          - runner: macos-15-intel
+            arch: x86_64
+            label: Intel
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      # Works whether the source sits at the repo root or inside bridge-mac/.
+      - name: Locate source
+        id: loc
+        shell: bash
+        run: |
+          if [ -f nowplaying_bridge_mac.py ]; then dir="."
+          elif [ -f bridge-mac/nowplaying_bridge_mac.py ]; then dir="bridge-mac"
+          else
+            echo "Repository contents:"; find . -maxdepth 3 -type f | head -50
+            echo "::error::nowplaying_bridge_mac.py not found at the repo root or in bridge-mac/"; exit 1
+          fi
+          echo "Building from: $dir"
+          echo "dir=$dir" >> "$GITHUB_OUTPUT"
+
+      - name: Install PyInstaller
+        working-directory: ${{ steps.loc.outputs.dir }}
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pyinstaller
+          # No requirements.txt on purpose: the Mac bridge is standard library only.
+
+      - name: Build the app
+        working-directory: ${{ steps.loc.outputs.dir }}
+        run: >
+          python -m PyInstaller --windowed --noconfirm
+          --name "NowPlaying Bridge"
+          --icon nowplaying-bridge.icns
+          --osx-bundle-identifier com.federicoramirezhonack.nowplayingbridge
+          --hidden-import status_window
+          --add-data "status_window.py:."
+          nowplaying_bridge_mac.py
+
+      # Automation permission requires a usage description, or macOS kills the app
+      # instead of prompting. PyInstaller does not add one, so patch Info.plist.
+      - name: Add the Automation usage description
+        working-directory: ${{ steps.loc.outputs.dir }}
+        run: |
+          PLIST="dist/NowPlaying Bridge.app/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Add :NSAppleEventsUsageDescription string "NowPlaying Bridge reads the track playing in Music and Spotify so your stream overlay can show it."' "$PLIST"
+          /usr/libexec/PlistBuddy -c 'Add :LSApplicationCategoryType string public.app-category.utilities' "$PLIST"
+          /usr/libexec/PlistBuddy -c 'Set :CFBundleShortVersionString 1.0.0' "$PLIST"
+          /usr/libexec/PlistBuddy -c 'Print' "$PLIST" | head -30
+
+      # An ad-hoc signature is free and gives the app a stable identity, which is
+      # what macOS ties an Automation permission grant to. Without it, every
+      # rebuild re-prompts. It does NOT remove the Gatekeeper warning — only a
+      # paid Developer ID plus notarisation does that.
+      - name: Ad-hoc sign
+        working-directory: ${{ steps.loc.outputs.dir }}
+        run: |
+          codesign --force --deep --sign - "dist/NowPlaying Bridge.app"
+          codesign --verify --verbose "dist/NowPlaying Bridge.app"
+
+      - name: Smoke test
+        working-directory: ${{ steps.loc.outputs.dir }}
+        continue-on-error: true
+        run: |
+          "dist/NowPlaying Bridge.app/Contents/MacOS/NowPlaying Bridge" --console --quiet &
+          sleep 8
+          curl -sS --max-time 10 http://127.0.0.1:5788/health || echo "::warning::health check did not respond"
+          pkill -f "NowPlaying Bridge" || true
+
+      # Zip with ditto, which preserves the bundle's symlinks and permissions.
+      # A plain zip of a .app can arrive broken.
+      - name: Package
+        working-directory: ${{ steps.loc.outputs.dir }}
+        run: |
+          cd dist
+          ditto -c -k --sequesterRsrc --keepParent "NowPlaying Bridge.app" "NowPlayingBridge-mac-${{ matrix.arch }}.zip"
+          ls -lh *.zip
+
+      - name: Upload as a downloadable artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: NowPlayingBridge-mac-${{ matrix.arch }}
+          path: ${{ steps.loc.outputs.dir }}/dist/NowPlayingBridge-mac-${{ matrix.arch }}.zip
+          if-no-files-found: error
+
+      - name: Attach to the release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.loc.outputs.dir }}/dist/NowPlayingBridge-mac-${{ matrix.arch }}.zip
