@@ -37,18 +37,25 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
 APP_NAME = "NowPlaying Bridge"
-VERSION = "1.0.1-mac"
+VERSION = "1.0.2-mac"
 DEFAULT_PORT = 5788
 POLL_SECONDS = 0.5   # osascript is a process launch, so slower than the Windows loop
 QUIET = False
 
-# AppleScript joins fields with the ASCII unit separator: safe inside track names
-# in a way that a comma, tab or pipe is not.
+# Fields come back one per LINE.
 #
-# It must be built INSIDE the script with `character id 31` — pasting the raw
-# control byte into the source is a syntax error (-2741), because AppleScript's
-# parser will not accept an unescaped control character in a string literal.
-SEP = "\x1f"
+# Two hard-won rules about generating AppleScript:
+#
+# 1. Never paste a raw control byte into the source — the parser rejects it
+#    (-2741). `linefeed` is a built-in constant, so no escaping is involved.
+# 2. Never use short variable names inside a `tell application` block. Terms are
+#    resolved against the app's dictionary first, and a two-letter name can
+#    collide with the app's own terminology, which also reports as -2741. Every
+#    variable here is prefixed for that reason.
+#
+# A newline cannot occur inside a track name, so one field per line is
+# unambiguous and needs no delimiter of our own.
+SEP = "\n"
 
 
 # --------------------------------------------------------------------------
@@ -207,47 +214,48 @@ def run_applescript(source, timeout=4.0):
 # because someone loaded a browser source would be a genuine disaster.
 MUSIC_SCRIPT = """
 if application "Music" is not running then return ""
-set sp to (character id 31)
 tell application "Music"
-  set st to (player state as text)
-  if st is "stopped" then return "stopped"
+  set npState to (player state as text)
+  if npState is "stopped" then return "stopped"
   try
-    set t to current track
+    set npTrack to current track
   on error
     return "stopped"
   end try
-  set nm to ""
+  set npName to ""
   try
-    set nm to (name of t)
+    set npName to (name of npTrack) as text
   end try
-  if nm is "" then return "stopped"
-  set ar to ""
+  if npName is "" then return "stopped"
+  set npArtist to ""
   try
-    set ar to (artist of t)
+    set npArtist to (artist of npTrack) as text
   end try
-  set alb to ""
+  set npAlbum to ""
   try
-    set alb to (album of t)
+    set npAlbum to (album of npTrack) as text
   end try
-  set aart to ""
+  set npAlbumArtist to ""
   try
-    set aart to (album artist of t)
+    set npAlbumArtist to (album artist of npTrack) as text
   end try
-  set dur to 0
+  set npDuration to 0
   try
-    set dur to (duration of t)
+    set npDuration to (duration of npTrack)
   end try
-  set pos to 0
+  set npPosition to 0
   try
-    set pos to (player position)
+    set npPosition to (player position)
   end try
-  set trkn to 0
+  set npTrackNumber to 0
   try
-    set trkn to (track number of t)
+    set npTrackNumber to (track number of npTrack)
   end try
-  set out to st & sp & nm & sp & ar & sp & alb & sp & aart
-  set out to out & sp & (dur as text) & sp & (pos as text) & sp & (trkn as text)
-  return out
+  set npOut to npState & linefeed & npName & linefeed & npArtist
+  set npOut to npOut & linefeed & npAlbum & linefeed & npAlbumArtist
+  set npOut to npOut & linefeed & (npDuration as text) & linefeed & (npPosition as text)
+  set npOut to npOut & linefeed & (npTrackNumber as text)
+  return npOut
 end tell
 """
 
@@ -255,51 +263,52 @@ end tell
 # those up is the classic bug in every Spotify-on-Mac integration.
 SPOTIFY_SCRIPT = """
 if application "Spotify" is not running then return ""
-set sp to (character id 31)
 tell application "Spotify"
-  set st to (player state as text)
-  if st is "stopped" then return "stopped"
+  set npState to (player state as text)
+  if npState is "stopped" then return "stopped"
   try
-    set t to current track
+    set npTrack to current track
   on error
     return "stopped"
   end try
-  set nm to ""
+  set npName to ""
   try
-    set nm to (name of t)
+    set npName to (name of npTrack) as text
   end try
-  if nm is "" then return "stopped"
-  set ar to ""
+  if npName is "" then return "stopped"
+  set npArtist to ""
   try
-    set ar to (artist of t)
+    set npArtist to (artist of npTrack) as text
   end try
-  set alb to ""
+  set npAlbum to ""
   try
-    set alb to (album of t)
+    set npAlbum to (album of npTrack) as text
   end try
-  set aart to ""
+  set npAlbumArtist to ""
   try
-    set aart to (album artist of t)
+    set npAlbumArtist to (album artist of npTrack) as text
   end try
-  set dur to 0
+  set npDuration to 0
   try
-    set dur to (duration of t)
+    set npDuration to (duration of npTrack)
   end try
-  set pos to 0
+  set npPosition to 0
   try
-    set pos to (player position)
+    set npPosition to (player position)
   end try
-  set trkn to 0
+  set npTrackNumber to 0
   try
-    set trkn to (track number of t)
+    set npTrackNumber to (track number of npTrack)
   end try
-  set art to ""
+  set npArtwork to ""
   try
-    set art to (artwork url of t)
+    set npArtwork to (artwork url of npTrack) as text
   end try
-  set out to st & sp & nm & sp & ar & sp & alb & sp & aart
-  set out to out & sp & (dur as text) & sp & (pos as text) & sp & (trkn as text) & sp & art
-  return out
+  set npOut to npState & linefeed & npName & linefeed & npArtist
+  set npOut to npOut & linefeed & npAlbum & linefeed & npAlbumArtist
+  set npOut to npOut & linefeed & (npDuration as text) & linefeed & (npPosition as text)
+  set npOut to npOut & linefeed & (npTrackNumber as text) & linefeed & npArtwork
+  return npOut
 end tell
 """
 
@@ -322,7 +331,7 @@ def parse_fields(raw, adapter):
     parts = raw.split(SEP)
     if len(parts) < 8:
         return None
-    state, title, artist, album, album_artist, dur_s, pos_s, trk = parts[:8]
+    state, title, artist, album, album_artist, dur_s, pos_s, trk = [p.strip() for p in parts[:8]]
     title = title.strip()
     if not title:
         return None
@@ -380,16 +389,16 @@ ART_SCRIPT = """
 if application "Music" is not running then return ""
 tell application "Music"
   try
-    set d to raw data of artwork 1 of current track
+    set npData to raw data of artwork 1 of current track
   on error
     return ""
   end try
 end tell
 try
-  set f to open for access (POSIX file "%s") with write permission
-  set eof f to 0
-  write d to f
-  close access f
+  set npFile to open for access (POSIX file "%s") with write permission
+  set eof npFile to 0
+  write npData to npFile
+  close access npFile
 on error
   try
     close access (POSIX file "%s")
