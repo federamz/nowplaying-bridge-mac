@@ -39,7 +39,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
 APP_NAME = "NowPlaying Bridge"
-VERSION = "1.0.3-mac"
+VERSION = "1.1.0-mac"
 DEFAULT_PORT = 5788
 POLL_SECONDS = 0.5   # osascript is a process launch, so slower than the Windows loop
 QUIET = False
@@ -314,6 +314,42 @@ tell application "Spotify"
 end tell
 """
 
+# VLC does have an AppleScript dictionary, unlike the Electron players — but it
+# is a video app, so it exposes no artist or album, only the item's name. Most
+# music files are named "Artist - Title", so that gets split below; anything else
+# shows as a title with no artist, and the widget looks up nothing.
+VLC_SCRIPT = """
+if application "VLC" is not running then return ""
+tell application "VLC"
+  set npPlaying to false
+  try
+    set npPlaying to playing
+  end try
+  set npName to ""
+  try
+    set npName to (name of current item) as text
+  on error
+    return "stopped"
+  end try
+  if npName is "" then return "stopped"
+  set npDuration to 0
+  try
+    set npDuration to (duration of current item)
+  end try
+  set npPosition to 0
+  try
+    set npPosition to (current time)
+  end try
+  set npState to "paused"
+  if npPlaying then set npState to "playing"
+  set npOut to npState & linefeed & npName & linefeed & ""
+  set npOut to npOut & linefeed & "" & linefeed & ""
+  set npOut to npOut & linefeed & (npDuration as text) & linefeed & (npPosition as text)
+  set npOut to npOut & linefeed & "0"
+  return npOut
+end tell
+"""
+
 ADAPTERS = [
     # source id doubles as the filter token, and matches the Windows bridge's
     # vocabulary so one widget setting works on both platforms.
@@ -321,6 +357,8 @@ ADAPTERS = [
      "duration_ms": False, "art": "raw"},
     {"source": "spotify", "name": "Spotify", "script": SPOTIFY_SCRIPT,
      "duration_ms": True, "art": "url"},
+    {"source": "vlc", "name": "VLC", "script": VLC_SCRIPT,
+     "duration_ms": False, "art": "none", "split_name": True},
 ]
 
 STATUS_MAP = {"playing": "playing", "paused": "paused", "stopped": "stopped"}
@@ -337,6 +375,20 @@ def parse_fields(raw, adapter):
     title = title.strip()
     if not title:
         return None
+
+    # Players with no metadata (VLC) give a filename. "Artist - Title.mp3" is the
+    # near-universal convention, so split it and drop the extension — that is
+    # what makes artwork lookup possible for local files.
+    if adapter.get("split_name") and not artist:
+        stem = title.rsplit(".", 1)
+        if len(stem) == 2 and 2 <= len(stem[1]) <= 4:
+            title = stem[0]
+        for dash in (" - ", " \u2013 ", " \u2014 "):
+            if dash in title:
+                left, right = title.split(dash, 1)
+                if left.strip() and right.strip():
+                    artist, title = left.strip(), right.strip()
+                break
 
     def num(text):
         try:
@@ -521,7 +573,12 @@ def is_showable(session):
 
 
 def pick_current(sessions):
-    """A session that is actually playing wins over one merely open and paused."""
+    """
+    A session that is actually playing wins over one merely open and paused.
+
+    Adapter order breaks ties, so Music and Spotify are preferred over VLC — a
+    video player is the least likely thing a music overlay should follow.
+    """
     playing = [s for s in sessions if s["is_playing"]]
     if playing:
         return playing[0]

@@ -26,6 +26,7 @@ window), `--quiet`. Settings also live in `settings.ini` next to the app.
 | :--- | :--- |
 | **Music.app** (Apple Music, local library, iTunes purchases) | Full metadata, embedded album art, **exact** playback position |
 | **Spotify.app** | Full metadata, album art, exact position |
+| **VLC** | Title only — it's a video player with no artist or album in its dictionary. `Artist - Title.mp3` filenames get split, and the widget looks the cover up by name. |
 | Anything in a **browser tab** | Not readable. See below. |
 | **TIDAL, Deezer, Qobuz, Amazon Music** desktop apps | Not readable — they're Electron apps with no AppleScript dictionary. Use Last.fm; TIDAL connects to it in one click. |
 | Other desktop players | Only if they ship an AppleScript dictionary. Easy to add — see *Adding a player*. |
@@ -62,9 +63,10 @@ Only needed once per version. The source is here; build it yourself with
 ## Automation permission
 
 The first read triggers *"NowPlaying Bridge wants access to control Music."*
-Allow it. If you refuse, or clicked past it, the bridge says so plainly in its
-window and at `/health`, and you can fix it in **System Settings → Privacy &
-Security → Automation**.
+Allow it. You get one prompt per app it reads (Music, Spotify, VLC). If you
+refuse, or clicked past it, the bridge says so plainly in its window and at
+`/health`, and you can fix it in **System Settings → Privacy & Security →
+Automation**.
 
 The build is ad-hoc signed, which gives it a stable identity — so the permission
 you grant survives updates instead of re-prompting every time.
@@ -72,7 +74,7 @@ you grant survives updates instead of re-prompting every time.
 ## API
 
 `GET http://127.0.0.1:5788/now-playing` — optional `?app=` filter
-(`applemusic`, `spotify`).
+(`applemusic`, `spotify`, `vlc`).
 
 ```json
 {
