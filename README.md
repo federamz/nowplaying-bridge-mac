@@ -25,8 +25,9 @@ window), `--quiet`. Settings also live in `settings.ini` next to the app.
 | | |
 | :--- | :--- |
 | **Music.app** (Apple Music, local library, iTunes purchases) | Full metadata, embedded album art, **exact** playback position |
-| **Spotify.app** | Full metadata, artwork URL, exact position |
+| **Spotify.app** | Full metadata, album art, exact position |
 | Anything in a **browser tab** | Not readable. See below. |
+| **TIDAL, Deezer, Qobuz, Amazon Music** desktop apps | Not readable — they're Electron apps with no AppleScript dictionary. Use Last.fm; TIDAL connects to it in one click. |
 | Other desktop players | Only if they ship an AppleScript dictionary. Easy to add — see *Adding a player*. |
 
 **Why browsers don't work.** macOS has a system-wide now-playing service
@@ -104,9 +105,10 @@ you grant survives updates instead of re-prompting every time.
 `session` is `null` when nothing is loaded or playback stopped — the overlay's
 cue to hide. A pause keeps the session with `status: "paused"`.
 
-`thumbnail` is a data URL for Music.app, an `https://` URL for Spotify, and
-`null` when the player has no artwork. A client that gets `null` should look the
-cover up by artist and title.
+`thumbnail` is a data URL for both players, and `null` when the player has no
+artwork. Spotify's own artwork link is short-lived, so the bridge downloads it
+once and embeds it — otherwise the cover loads and then vanishes. A client that
+gets `null` should look the cover up by artist and title.
 
 `GET /sessions` — every player it can see. Open it in a browser for a readable
 page listing the id to paste into an overlay's app filter.

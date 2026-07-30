@@ -23,6 +23,7 @@ Standard library only. No pip install, no third-party runtime.
 """
 
 import argparse
+import base64
 import configparser
 import json
 import os
@@ -32,12 +33,13 @@ import sys
 import threading
 import time
 import traceback
+import urllib.request
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
 APP_NAME = "NowPlaying Bridge"
-VERSION = "1.0.2-mac"
+VERSION = "1.0.3-mac"
 DEFAULT_PORT = 5788
 POLL_SECONDS = 0.5   # osascript is a process launch, so slower than the Windows loop
 QUIET = False
@@ -439,7 +441,31 @@ def music_artwork():
     mime = sniff_mime(raw[:8])
     if not mime:
         return None
-    import base64
+    return f"data:{mime};base64," + base64.b64encode(raw).decode("ascii")
+
+
+def fetch_art_url(url):
+    """
+    Download a player's artwork URL and return it as a data URL.
+
+    Spotify's `artwork url` is a short-lived CDN link: it loads once and then
+    stops resolving, which showed up as album art that flashed and vanished.
+    Fetching the bytes here once and handing back a data URL makes the artwork
+    permanent for that track, and matches what the Windows bridge always sends.
+    """
+    if not url.startswith(("http://", "https://")):
+        return None  # older Spotify builds return an `image:` handle we can't read
+    try:
+        request = urllib.request.Request(url, headers={"User-Agent": f"{APP_NAME}/{VERSION}"})
+        with urllib.request.urlopen(request, timeout=5) as response:
+            raw = response.read(4 * 1024 * 1024)
+    except Exception:
+        return None
+    if len(raw) < 256:
+        return None
+    mime = sniff_mime(raw[:8])
+    if not mime:
+        return None
     return f"data:{mime};base64," + base64.b64encode(raw).decode("ascii")
 
 
@@ -457,7 +483,8 @@ def resolve_artwork(session, adapter):
         return _art_cache[key]
     art = None
     if adapter["art"] == "url" and session.get("_artwork_url"):
-        art = session["_artwork_url"]          # Spotify gives a plain https URL
+        # Fetch rather than pass the URL through: see fetch_art_url.
+        art = fetch_art_url(session["_artwork_url"])
     elif adapter["art"] == "raw":
         art = music_artwork()
     if len(_art_cache) >= _ART_CACHE_MAX:
