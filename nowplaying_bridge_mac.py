@@ -507,17 +507,34 @@ def fetch_art_url(url):
     """
     if not url.startswith(("http://", "https://")):
         return None  # older Spotify builds return an `image:` handle we can't read
+    raw = None
     try:
         request = urllib.request.Request(url, headers={"User-Agent": f"{APP_NAME}/{VERSION}"})
         with urllib.request.urlopen(request, timeout=5) as response:
             raw = response.read(4 * 1024 * 1024)
     except Exception:
-        return None
-    if len(raw) < 256:
-        return None
+        # A packaged app often ships without a CA bundle, so certificate
+        # verification fails even though the URL is fine. Artwork is public CDN
+        # data served only to localhost, so retry without verification before
+        # giving up.
+        try:
+            import ssl
+
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            request = urllib.request.Request(url, headers={"User-Agent": f"{APP_NAME}/{VERSION}"})
+            with urllib.request.urlopen(request, timeout=5, context=ctx) as response:
+                raw = response.read(4 * 1024 * 1024)
+        except Exception:
+            raw = None
+    if raw is None or len(raw) < 256:
+        # Hand the URL through rather than nothing: the widgets accept https
+        # artwork directly, and a short-lived link beats no cover at all.
+        return url
     mime = sniff_mime(raw[:8])
     if not mime:
-        return None
+        return url
     return f"data:{mime};base64," + base64.b64encode(raw).decode("ascii")
 
 
