@@ -1,5 +1,5 @@
 """
-NowPlaying Bridge for macOS — exposes what your Mac is playing as a local JSON API.
+NowPlaying Bridge for macOS, exposes what your Mac is playing as a local JSON API.
 
 Same contract as the Windows bridge: http://127.0.0.1:5788/now-playing, same
 field names, same port. A widget cannot tell the two apart, and does not need to.
@@ -9,8 +9,8 @@ WHY APPLESCRIPT AND NOT THE SYSTEM NOW-PLAYING API
 macOS has a system-wide now-playing service (MediaRemote), which is what the
 menu bar and Control Center read. From macOS 15.4 Apple gated it behind a
 private entitlement, so every third-party tool that used it stopped working.
-The only ways around that are code injection with SIP disabled — unacceptable
-for software people buy — or asking each player directly through AppleScript,
+The only ways around that are code injection with SIP disabled, unacceptable
+for software people buy, or asking each player directly through AppleScript,
 which is public, supported, and needs no security changes.
 
 The trade-off is honest and worth stating: AppleScript talks to APPS, not to the
@@ -39,7 +39,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
 APP_NAME = "NowPlaying Bridge"
-VERSION = "1.1.0-mac"
+VERSION = "1.2.0-mac"
 DEFAULT_PORT = 5788
 POLL_SECONDS = 0.5   # osascript is a process launch, so slower than the Windows loop
 QUIET = False
@@ -48,7 +48,7 @@ QUIET = False
 #
 # Two hard-won rules about generating AppleScript:
 #
-# 1. Never paste a raw control byte into the source — the parser rejects it
+# 1. Never paste a raw control byte into the source, the parser rejects it
 #    (-2741). `linefeed` is a built-in constant, so no escaping is involved.
 # 2. Never use short variable names inside a `tell application` block. Terms are
 #    resolved against the app's dictionary first, and a two-letter name can
@@ -205,14 +205,14 @@ def run_applescript(source, timeout=4.0):
         err = (done.stderr or "").strip()
         if "-1743" in err or "not allowed assistive" in err or "not authorised" in err:
             return "", "permission"
-        if "-1728" in err:          # "can't get current track" — nothing loaded
+        if "-1728" in err:          # "can't get current track". Nothing loaded
             return "", None
         return "", err[:200] or "applescript error"
     return done.stdout.strip(), None
 
 
 # Each adapter asks one app for everything in a single call. `is running` is
-# checked first and never launches the app — an overlay that opened iTunes
+# checked first and never launches the app, an overlay that opened iTunes
 # because someone loaded a browser source would be a genuine disaster.
 MUSIC_SCRIPT = """
 if application "Music" is not running then return ""
@@ -314,7 +314,7 @@ tell application "Spotify"
 end tell
 """
 
-# VLC does have an AppleScript dictionary, unlike the Electron players — but it
+# VLC does have an AppleScript dictionary, unlike the Electron players, but it
 # is a video app, so it exposes no artist or album, only the item's name. Most
 # music files are named "Artist - Title", so that gets split below; anything else
 # shows as a title with no artist, and the widget looks up nothing.
@@ -377,7 +377,7 @@ def parse_fields(raw, adapter):
         return None
 
     # Players with no metadata (VLC) give a filename. "Artist - Title.mp3" is the
-    # near-universal convention, so split it and drop the extension — that is
+    # near-universal convention, so split it and drop the extension. That is
     # what makes artwork lookup possible for local files.
     if adapter.get("split_name") and not artist:
         stem = title.rsplit(".", 1)
@@ -423,7 +423,7 @@ def parse_fields(raw, adapter):
         "duration_ms": duration_ms,
         "position_ms": position_ms,
         # AppleScript reports position at the instant it is asked, so the
-        # snapshot IS current — no extrapolation from a stale timestamp needed.
+        # snapshot IS current, no extrapolation from a stale timestamp needed.
         "position_at": now_ms,
         "position_snapshot_ms": position_ms,
         "position_updated_at": now_ms,
@@ -521,27 +521,44 @@ def fetch_art_url(url):
     return f"data:{mime};base64," + base64.b64encode(raw).decode("ascii")
 
 
+# Cached artwork stays open to revision for this long after a track first
+# appears. Players push metadata out of order — Spotify can report the new
+# title while its artwork url still points at the previous track — so the
+# first read after a switch may be wrong or empty. The Windows bridge has had
+# this settle window since v1.4; same fix here.
+ART_SETTLE_MS = 6000
+
+
 def resolve_artwork(session, adapter):
     """
     Attach artwork, cached per track.
 
-    A miss is cached too. Some Apple Music cloud tracks simply have no local
-    artwork, and retrying every half second for a whole song would launch a
-    hundred pointless AppleScript processes. The widget looks the cover up by
-    name when the bridge hands over nothing, so a miss costs the user nothing.
+    Entries stay revisable for ART_SETTLE_MS, then freeze. A miss is cached
+    after that too: some Apple Music cloud tracks simply have no local artwork,
+    and retrying every half second for a whole song would launch a hundred
+    pointless AppleScript processes. The widget looks the cover up by name when
+    the bridge hands over nothing, so a frozen miss costs the user nothing.
+    A temporary miss during the window never blanks art we already have.
     """
     key = (session["source"], session["title"], session["artist"])
-    if key in _art_cache:
-        return _art_cache[key]
+    now_ms = time.time() * 1000
+    entry = _art_cache.get(key)
+    if entry is not None and (now_ms - entry["first"]) > ART_SETTLE_MS:
+        return entry["data"]
     art = None
     if adapter["art"] == "url" and session.get("_artwork_url"):
         # Fetch rather than pass the URL through: see fetch_art_url.
         art = fetch_art_url(session["_artwork_url"])
     elif adapter["art"] == "raw":
         art = music_artwork()
-    if len(_art_cache) >= _ART_CACHE_MAX:
-        _art_cache.clear()
-    _art_cache[key] = art
+    if entry is None:
+        if len(_art_cache) >= _ART_CACHE_MAX:
+            _art_cache.clear()
+        _art_cache[key] = {"data": art, "first": now_ms}
+    elif art:
+        entry["data"] = art
+    else:
+        art = entry["data"]
     return art
 
 
@@ -576,7 +593,7 @@ def pick_current(sessions):
     """
     A session that is actually playing wins over one merely open and paused.
 
-    Adapter order breaks ties, so Music and Spotify are preferred over VLC — a
+    Adapter order breaks ties, so Music and Spotify are preferred over VLC, a
     video player is the least likely thing a music overlay should follow.
     """
     playing = [s for s in sessions if s["is_playing"]]
@@ -642,7 +659,7 @@ def poll_forever():
                 cur = get_state()["current"]
                 key = (cur or {}).get("title"), (cur or {}).get("artist")
                 if cur and key != last_key:
-                    safe_print(f"  ♪ {cur['artist']} — {cur['title']}  [{cur['source_name']}]")
+                    safe_print(f"  ♪ {cur['artist']}, {cur['title']}  [{cur['source_name']}]")
                     last_key = key
         except Exception as exc:
             set_state(error=str(exc))
@@ -744,7 +761,7 @@ class Handler(BaseHTTPRequestHandler):
 
         rows = []
         for s in snapshot["sessions"]:
-            track = " — ".join(x for x in (s["artist"], s["title"]) if x) or "nothing loaded"
+            track = ", ".join(x for x in (s["artist"], s["title"]) if x) or "nothing loaded"
             rows.append(
                 f"<li><code>{esc(s['source'])}</code>"
                 f"<div class=meta>{esc(s['source_name'])} · {esc(s['status'])}</div>"
@@ -755,7 +772,7 @@ class Handler(BaseHTTPRequestHandler):
                                         "Press play and reload this page.")
             rows.append(f"<li class=empty>{esc(note)}</li>")
         body = """<!doctype html><html><head><meta charset=utf-8>
-<title>{app} — active players</title><meta name=viewport content="width=device-width,initial-scale=1">
+<title>{app}, active players</title><meta name=viewport content="width=device-width,initial-scale=1">
 <style>
 body{{margin:0;background:#0e0e12;color:#f2f2f5;font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;padding:32px}}
 h1{{font-size:19px;margin:0 0 4px}}
@@ -770,8 +787,7 @@ footer{{color:#8b8b97;font-size:12.5px;margin-top:24px}}
 </style></head><body>
 <h1>Active players</h1>
 <p>Copy the highlighted id into the widget's “Follow only” field to pin the
-overlay to one player. Music playing in a browser tab cannot appear here —
-browsers expose no way to read it. Use the Last.fm route for those.</p>
+overlay to one player. Music playing in a browser tab cannot appear here, browsers expose no way to read it. Use the Last.fm route for those.</p>
 <ul>{rows}</ul>
 <footer>{app} {ver} · reload to refresh</footer>
 </body></html>""".format(app=APP_NAME, ver=VERSION, rows="".join(rows))
@@ -837,7 +853,7 @@ def main():
         if args.console:
             safe_print("  " + msg.replace("\n", "\n  "))
         else:
-            show_error(f"{APP_NAME} — could not start", msg)
+            show_error(f"{APP_NAME}. Could not start", msg)
         return 1
 
     serve = threading.Thread(target=server.serve_forever, name="http", daemon=True)

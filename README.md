@@ -2,7 +2,7 @@
 
 Reads the track playing on your Mac and serves it as JSON on localhost, so a
 stream overlay can display it. Companion to the Windows bridge; **same port, same
-JSON, same field names** — a widget cannot tell them apart and needs no setting
+JSON, same field names**, a widget cannot tell them apart and needs no setting
 changed.
 
 MIT licensed. Standard library only: no pip install, no third-party runtime.
@@ -12,9 +12,9 @@ MIT licensed. Standard library only: no pip install, no third-party runtime.
 1. Download `NowPlayingBridge-mac-arm64.zip` (Apple Silicon) or
    `-x86_64.zip` (Intel) from the [latest release](../../releases/latest).
 2. Unzip and drag **NowPlaying Bridge** into your Applications folder.
-3. Open it. macOS will warn you the first time — see *Gatekeeper* below.
+3. Open it. macOS will warn you the first time. See *Gatekeeper* below.
 4. The first time it reads a player, macOS asks for permission to control Music
-   and Spotify. **Allow it** — that is how it reads your music.
+   and Spotify. **Allow it**. That is how it reads your music.
 5. Press play. The window names the track; the overlay picks it up.
 
 Options: `--port 5789`, `--host 0.0.0.0`, `--console` (terminal instead of a
@@ -26,16 +26,16 @@ window), `--quiet`. Settings also live in `settings.ini` next to the app.
 | :--- | :--- |
 | **Music.app** (Apple Music, local library, iTunes purchases) | Full metadata, embedded album art, **exact** playback position |
 | **Spotify.app** | Full metadata, album art, exact position |
-| **VLC** | Title only — it's a video player with no artist or album in its dictionary. `Artist - Title.mp3` filenames get split, and the widget looks the cover up by name. |
+| **VLC** | Title only. It's a video player with no artist or album in its dictionary. `Artist - Title.mp3` filenames get split, and the widget looks the cover up by name. |
 | Anything in a **browser tab** | Not readable. See below. |
-| **TIDAL, Deezer, Qobuz, Amazon Music** desktop apps | Not readable — they're Electron apps with no AppleScript dictionary. Use Last.fm; TIDAL connects to it in one click. |
-| Other desktop players | Only if they ship an AppleScript dictionary. Easy to add — see *Adding a player*. |
+| **TIDAL, Deezer, Qobuz, Amazon Music** desktop apps | Not readable. They're Electron apps with no AppleScript dictionary. Use Last.fm; TIDAL connects to it in one click. |
+| Other desktop players | Only if they ship an AppleScript dictionary. Easy to add. See *Adding a player*. |
 
 **Why browsers don't work.** macOS has a system-wide now-playing service
 (MediaRemote) that Control Center reads. From **macOS 15.4** Apple gated it
 behind a private entitlement, and every third-party tool built on it stopped
-working. The workarounds are code injection with SIP disabled — unacceptable for
-software people pay for — or asking each app directly through AppleScript, which
+working. The workarounds are code injection with SIP disabled, unacceptable for
+software people pay for, or asking each app directly through AppleScript, which
 is public, supported, and needs no security changes. This bridge does the latter.
 Browsers expose no scripting interface for media, so a tab playing YouTube Music
 or Apple Music on the web is invisible to it.
@@ -68,12 +68,12 @@ refuse, or clicked past it, the bridge says so plainly in its window and at
 `/health`, and you can fix it in **System Settings → Privacy & Security →
 Automation**.
 
-The build is ad-hoc signed, which gives it a stable identity — so the permission
+The build is ad-hoc signed, which gives it a stable identity, so the permission
 you grant survives updates instead of re-prompting every time.
 
 ## API
 
-`GET http://127.0.0.1:5788/now-playing` — optional `?app=` filter
+`GET http://127.0.0.1:5788/now-playing`, optional `?app=` filter
 (`applemusic`, `spotify`, `vlc`).
 
 ```json
@@ -104,18 +104,18 @@ you grant survives updates instead of re-prompting every time.
 }
 ```
 
-`session` is `null` when nothing is loaded or playback stopped — the overlay's
+`session` is `null` when nothing is loaded or playback stopped, the overlay's
 cue to hide. A pause keeps the session with `status: "paused"`.
 
 `thumbnail` is a data URL for both players, and `null` when the player has no
 artwork. Spotify's own artwork link is short-lived, so the bridge downloads it
-once and embeds it — otherwise the cover loads and then vanishes. A client that
+once and embeds it, otherwise the cover loads and then vanishes. A client that
 gets `null` should look the cover up by artist and title.
 
-`GET /sessions` — every player it can see. Open it in a browser for a readable
+`GET /sessions`, every player it can see. Open it in a browser for a readable
 page listing the id to paste into an overlay's app filter.
 
-`GET /health` — version, macOS version, and any permission error in plain words.
+`GET /health`, version, macOS version, and any permission error in plain words.
 
 ## Adding a player
 
@@ -127,7 +127,7 @@ entry, change the app name, and check its dictionary in Script Editor
 Two rules learned the hard way:
 
 - Guard every script with `if application "X" is not running then return ""`.
-  A plain `tell application "Music"` **launches** Music — an overlay that opened
+  A plain `tell application "Music"` **launches** Music, an overlay that opened
   iTunes because someone loaded a browser source would be a disaster.
 - Check the units. Music.app reports duration in **seconds**; Spotify reports it
   in **milliseconds**. That mismatch is the classic bug in every Spotify
@@ -142,6 +142,6 @@ so instead of failing on the port.
 Players briefly report nothing between tracks, so the bridge holds the last good
 session for 4 seconds to stop overlays blinking on every skip.
 
-Album artwork is cached per track, misses included — some Apple Music cloud
+Album artwork is cached per track, misses included, some Apple Music cloud
 tracks have no local artwork, and retrying twice a second for a whole song would
 spawn hundreds of pointless processes.

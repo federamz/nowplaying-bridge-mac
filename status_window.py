@@ -5,7 +5,7 @@ Tkinter only (Python standard library), so the packaged app stays small and the
 build needs no extra wheels. Styled to match the Now Playing OS overlay: dark
 surface, one accent, no chrome it doesn't need.
 
-The window is passive — it shows what the bridge sees and lets you copy the URL.
+The window is passive. It shows what the bridge sees and lets you copy the URL.
 Closing it quits the bridge, which is what a streamer expects from a window.
 """
 
@@ -152,7 +152,7 @@ class StatusWindow:
                 text="Playing" if playing else "Paused", fg=TEXT if playing else AMBER
             )
             self.title_lbl.configure(text=session["title"])
-            self.artist_lbl.configure(text=session.get("artist") or "—")
+            self.artist_lbl.configure(text=session.get("artist") or ", ")
             self.app_lbl.configure(
                 text=(session.get("source_name") or session.get("source") or "").upper()
             )
